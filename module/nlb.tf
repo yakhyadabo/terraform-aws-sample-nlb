@@ -1,4 +1,4 @@
-resource "aws_lb" "this" {
+resource "aws_lb" "nlb" {
   name_prefix   = "${var.service_name}-"
   load_balancer_type = "network"
   subnets            = data.aws_subnets.public.ids
@@ -6,21 +6,21 @@ resource "aws_lb" "this" {
   enable_cross_zone_load_balancing = true
 }
 
-resource "aws_lb_listener" "this" {
+resource "aws_lb_listener" "nginx" {
   for_each              = var.ports
 
-  load_balancer_arn = aws_lb.this.arn
+  load_balancer_arn = aws_lb.nlb.arn
 
   protocol          = "TCP" #(TLS)
   port              = each.value
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.this[each.key].arn
+    target_group_arn = aws_lb_target_group.nginx[each.key].arn
   }
 }
 
-resource "aws_lb_target_group" "this" {
+resource "aws_lb_target_group" "nginx" {
   for_each = var.ports
 
   port        = each.value
@@ -29,7 +29,7 @@ resource "aws_lb_target_group" "this" {
   # target_type = "instance"
 
   depends_on = [
-    aws_lb.this
+    aws_lb.nlb
   ]
 
   lifecycle {
@@ -41,7 +41,7 @@ data "template_file" "nginx" {
   template = file("${path.module}/file/nginx.sh")
 }
 
-resource "aws_launch_configuration" "service" {
+resource "aws_launch_configuration" "nginx" {
   name_prefix             = "${var.service_name}-${var.environment}-"
   image_id                = data.aws_ami.ubuntu.id
   instance_type           = "t2.micro"
@@ -55,10 +55,9 @@ resource "aws_launch_configuration" "service" {
   }
 }
 
-resource "aws_autoscaling_group" "service" {
-  # for_each              = var.ports
+resource "aws_autoscaling_group" "nginx" {
   name_prefix   = "${var.service_name}-${var.environment}-"
-  launch_configuration      = aws_launch_configuration.service.id
+  launch_configuration      = aws_launch_configuration.nginx.id
   min_size                  = 1
   max_size                  = length(data.aws_subnets.private.ids)
   desired_capacity          = length(data.aws_subnets.private.ids)
@@ -74,6 +73,6 @@ resource "aws_autoscaling_group" "service" {
 
 resource "aws_autoscaling_attachment" "target" {
   for_each = var.ports
-  autoscaling_group_name = aws_autoscaling_group.service.id
-  lb_target_group_arn   = aws_lb_target_group.this[each.key].arn
+  autoscaling_group_name = aws_autoscaling_group.nginx.id
+  lb_target_group_arn   = aws_lb_target_group.nginx[each.key].arn
 }
